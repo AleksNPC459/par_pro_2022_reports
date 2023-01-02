@@ -1,0 +1,562 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T2A]{fontenc}
+\usepackage{graphicx}
+\usepackage{mathtools}
+\usepackage{listings}
+\usepackage{color}
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+
+\lstset{frame=tb,
+  language=Java,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=flexible,
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{mauve},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3
+}
+
+\title{}
+\author{}
+\date{}
+\begin{document}
+
+\begin{titlepage}
+    \newpage
+    \begin{center}
+    {\bfseries МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ РОССИЙСКОЙ ФЕДЕРАЦИИ
+Федеральное государственное автономное образовательное учреждение
+высшего образования
+ \\
+    «Национальный исследовательский
+Нижегородский государственный университет им. Н.И. Лобачевского»
+(ННГУ)
+}
+
+    %\begin{center}
+     Институт информационных технологий, математики и механики \\
+    \end{center}
+
+    \vspace{1.2em}
+
+    \begin{center}
+    %\textsc{\textbf{}}
+    \Large отчет \linebreak по дисциплине «Параллельное программирование» \linebreak на тему: \linebreak
+«РЕАЛИЗАЦИЯ АЛГОРИТМА ПОРАЗРЯДНОЙ СОРТИРОВКИ С ПРОСТЫМ СЛИЯНИЕМ ДЛЯ ЦЕЛЫХ ЧИСЕЛ»
+
+    \end{center}
+
+    \vspace{5em}
+
+
+    \begin{flushright}
+                       Выполнил:
+                       студент группы 382006-2\linebreak Панов А.И.\underline{\hspace{3cm}} \linebreak\  Проверил: младший научный сотрудник\linebreak Нестеров А.Ю.\underline{\hspace{3cm}} 
+    \end{flushright}
+
+
+    \vspace{\fill}
+
+    \begin{center}
+    Нижний Новгород 2023
+    \end{center}
+
+    \end{titlepage}
+    
+\maketitle
+
+\part*{Введение}
+\paragraph{}Интерфейс передачи сообщений (Message Passing Interface, MPI) — программный интерфейс для передачи информации, который позволяет обмениваться сообщениями между процессами, выполняющими одну задачу. MPI является наиболее распространённым стандартом интерфейса обмена данными в параллельном программировании. Основным средством коммуникации между процессами в MPI является передача сообщений друг другу. В этой работе используется реализация MPI для языка программирования C++.
+
+\part*{Постановка задачи}
+\paragraph{}Требуется реализовать алгоритм поразрядной сортировки с простым слиянием для целых чисел. Числа, которые необходимо отсортировать по умолчанию хранятся в одномерном массиве. Задача состоит в реализации программы, которая выполняется параллельно на нескольких процессах и набор тестов для проверки работоспособности. Необходимо использовать систему контроля версий [Git][git] и фрэймворк для разработки автоматических тестов [Google Test][gtest].
+\paragraph{}В процессе выполнения должны быть выполнены следующие задачи:
+\begin{enumerate}
+\item Реализовать алгоритм поразрядной сортировки с простым слиянием для простых чисел;
+\item Реализовать алгоритм планирования для распределения данных между процессами;
+\item Разработать тесты с целью проверить работоспособность разработанной программы;
+\item Работа с системой контроля версий.
+\end{enumerate}
+\paragraph{}По факту завершения работы требуется предоставить файлы: CMakeLists.txt, int\_merge\_sort.cpp, int\_merge\_sort.h, main.cpp.
+
+\part*{Описание алгоритма}
+\paragraph{}Этапы работы алгоритма:
+\begin{enumerate} 
+\item Формирование исходных данных, которые необходимо отсортировать.
+\item Распределение данных между  процессами.
+\item Работа процессов:
+\begin{enumerate}
+    \item Сортировка данных алгоритмом поразрядной сортировки;
+    \item Отправка данных в процесс для слияния.
+\end{enumerate}
+\end{enumerate} 
+\paragraph{}Алгоритм планирования отвечает за подсчет размера данных, передающихся процессам. 
+\begin{lstlisting}
+void sortParallel(Vector* arr_) {
+	int rank, size;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
+	
+	Vector& arr = *arr_;
+	Vector tempArr;
+	
+	const int step = (arr.size() / size) + ((arr.size() % size) != 0);
+	const int arraySizeWithShift = step * size;
+	
+	if (rank == 0) {
+		tempArr = arr;
+		for (int i = tempArr.size(); i < arraySizeWithShift; i++) {
+			tempArr.push_back(std::numeric_limits<int>::max());
+		}
+	}
+	
+	Vector arrPart = Vector(step);
+	MPI_Scatter(tempArr.data(), step, MPI_INT, arrPart.data(), step, MPI_INT, 0, MPI_COMM_WORLD);
+	
+	intSort(&arrPart);
+	
+	MPI_Gather(arrPart.data(), step, MPI_INT, tempArr.data(), step, MPI_INT, 0, MPI_COMM_WORLD);
+	
+	if (rank == 0) {
+		Vector result = Vector();
+		result.reserve(arraySizeWithShift);
+		for (int i = 0; i < size; i++) {
+			result = mergeSort(result, tempArr, i * step, (i + 1) * step);
+		}
+		result.resize(arr.size());
+		arr = result;
+	}
+}
+\end{lstlisting}
+\paragraph{}В результате работы этого алгоритма будет определено количество элементов, которое необходимо отправить конкретному процессу.
+
+\paragraph{}
+Сравнение производится поразрядно: сначала сравниваются значения одного крайнего разряда, и элементы группируются по результатам этого сравнения, затем сравниваются значения следующего разряда, соседнего, и элементы либо упорядочиваются по результатам сравнения значений этого разряда внутри образованных на предыдущем проходе групп, либо переупорядочиваются в целом, но сохраняя относительный порядок, достигнутый при предыдущей сортировке. Затем аналогично делается для следующего разряда, и так до конца. Алгоритм сортировки: 
+\begin{lstlisting}
+Vector mergeSort(const Vector& first, const Vector& second, int sbegin, int send) {
+	Vector result = Vector();
+	result.reserve(first.size() + send - sbegin);
+	std::merge(
+	first.begin(),
+	first.end(),
+	second.begin() + sbegin,
+	second.begin() + send,
+	std::back_inserter(result));
+	return result;
+}
+
+int getMaxCategoryForVector(Vector* arr) {
+	int maxCategory = 0;
+	for (int num : *arr) {
+		maxCategory = std::max(maxCategory, getMaxCategoryForInt(num));
+	}
+	return maxCategory;
+}
+
+int getMaxCategoryForInt(int num) {
+	int category = -1;
+	do {
+		num /= 10;
+		category++;
+	} while (num != 0);
+	return category;
+}
+
+int getCategoryValue(int num, int category) {
+	for (int i = 0; i < category; i++) {
+		num /= 10;
+	}
+	return num % 10;
+}
+
+void intSortForCategory(Vector* arr_, int category) {
+	Vector& arr = *arr_;
+	auto tempArr = std::vector<Vector>(CATEGORIES_COUNT * 2);
+	
+	for (int i = 0; i < arr.size(); i++) {
+		int categoryValue = getCategoryValue(arr[i], category);
+		tempArr[categoryValue + CATEGORIES_COUNT - 1].push_back(arr[i]);
+	}
+	
+	arr.resize(0);
+	for (const auto& category : tempArr) {
+		for (int num : category) {
+			arr.push_back(num);
+		}
+	}
+}
+
+void intSort(Vector* arr) {
+	const int maxCategory = getMaxCategoryForVector(arr);
+	for (int i = 0; i <= maxCategory; i++) {
+		intSortForCategory(arr, i);
+	}
+}
+\end{lstlisting}
+
+\part*{Описание схемы распараллеливания}
+\paragraph{}В данном разделе приведена более подробная схема распараллеливания, реализованная в программе:
+\begin{enumerate} 
+\item Определение количества процессов и количества данных для отправки
+\item Заполнение массивов данных выделяемых каждому процессу
+\item Выдача данных процессам
+\item Каждый процесс производит сортировку данных
+\item Возвращение данных процессами
+\item Производится слияние и возвращается результат
+\end{enumerate} 
+
+\part*{Описание схемы OpenMPI}
+\paragraph{}Получение количества процессов происходит с помощью функции int MPI\_Comm\_size(MPI\_Comm comm, int *size), где comm - коммуникатор, size - количество процессов.
+\paragraph{}Получение номера процесса происходит с помощью функции int MPI\_Comm\_rank(MPI\_Comm comm, int *rank), где comm - коммуникатор, rank - номер процесса.
+\paragraph{}Отправка данных выполняется с помощью функции int MPI\_Scatterv(void* sendbuf, int *sendcounts, int *displs, MPI\_Datatype sendtype, void* recvbuf, int recvcount, MPI\_Datatype recvtype, int root, MPI\_Comm comm), где sendbuf - адрес начала буфера посылки, sendcounts - целочисленный массив, содержащий число элементов, посылаемых каждому процессу, displs - целочисленный массив, в котором i-ое значение определяет смещение относительно начала sendbuf для данных, посылаемых процессу i, sendtype - тип посылаемых элементов, recvbuf - адрес начала буфера приема, recvcount - число получаемых элементов, recvtype - тип получаемых элементов, root - номер процесса-отправителя, comm - коммуникатор.
+\paragraph{}Отправка данных процесса осуществляется с помощью функции int MPI\_Send(const void *buf, int count, MPI\_Datatype datatype, int dest, int tag, MPI\_Comm comm), где buf	-	адрес начала расположения пересылаемых данных, count	-	число пересылаемых элементов, datatype	-	тип посылаемых элементов, dest	-	номер процесса-получателя, tag	-	идентификатор сообщения, comm	-	коммуникатор.
+\paragraph{}Получение данных осуществляется с помощью функции int MPI\_Recv(void *buf, int count, MPI\_Datatype datatype, int source, int tag, MPI\_Comm comm, MPI\_Status *status), где buf	-	адрес начала расположения принимаемого сообщения, count	-	максимальное число принимаемых элементов, datatype	-	тип элементов принимаемого сообщения, source	-	номер процесса-отправителя, tag	-	идентификатор сообщения, comm	-	коммуникатор, status	-	атрибуты принятого сообщения. 
+
+\part*{Результаты экспериментов}
+\paragraph{}Время работы программы засекается при помощи MPI\_Wtime(). Работа программы тестировалась на 100, 1000 и 10000 элементах, которые требуется отсортировать. При этом количество процессов составляет 1, 2, 4 и 6. В таблице приведены результаты экспериментов, на пересечении количества процессов и количества элементов указано время выполнения сортировки.
+\begin{center}
+\begin{tabular}{||c c c c c ||} 
+ \hline
+ Число элементов / Число процессов & 1 & 2 & 4 & 6 \\ [0.5ex] 
+ \hline\hline
+ 100 & 0.0011464 & 0.0008244 & 0.0004631 & 0.0001892\\ 
+ \hline
+ 1000 & 0.009755 & 0.0054081 & 0.0023145 & 0.0006324 \\
+ \hline
+ 10000 & 0.0908764 & 0.0508991 & 0.0239076 & 0.0065877 \\
+[1ex] 
+ \hline
+\end{tabular}
+\end{center}
+\part*{Выводы результатов}
+\paragraph{} В результате проведения тестов было наглядно продемонстрировано явное преимущество параллельной программы над последовательной (на одном процессе), особенно при большем числе элементоа, в виду меньшего времени выполнения. 
+
+\part*{Заключение}
+\paragraph{}В данной лабораторной работе был реализован параллельный алгоритм поразрядной сортировки с простым слиянием для целых чисел (int) на языке С++ с применением технологии MPI.
+
+\part*{Литература}
+\begin{enumerate} 
+\item 1. Википедия: сайт. —  URL: https://ru.wikipedia.org/wiki/Message\_Passing\_Interface (дата обращения: 25.12.2022). —  Текст: электронный.
+\item 2. MPICH.org: сайт —  URL: https://www.mpich.org/static/docs/latest/www3/MPI\_Comm\_size.html (дата обращения: 25.12.2022). —  Текст: электронный.
+\item 3. habr.com: сайт —  URL: https://habr.com/ru/all/ (дата обращения: 25.12.2022). —  Текст: электронный.
+\end{enumerate} 
+
+\part*{Приложение}
+\section{}CMakeLists.txt
+\begin{lstlisting}
+get_filename_component(ProjectId ${CMAKE_CURRENT_SOURCE_DIR} NAME)
+enable_testing()
+
+if( USE_MPI )
+    if( UNIX )
+        set(CMAKE_C_FLAGS  "${CMAKE_CXX_FLAGS} -Wno-uninitialized")
+        set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wno-uninitialized")
+    endif( UNIX )
+
+    set(ProjectId "${ProjectId}_mpi")
+    project( ${ProjectId} )
+    message( STATUS "-- " ${ProjectId} )
+
+    file(GLOB_RECURSE ALL_SOURCE_FILES *.cpp *.h)
+
+    set(PACK_LIB "${ProjectId}_lib")
+    add_library(${PACK_LIB} STATIC ${ALL_SOURCE_FILES} )
+
+    add_executable( ${ProjectId} ${ALL_SOURCE_FILES} )
+
+    target_link_libraries(${ProjectId} ${PACK_LIB})
+    if( MPI_COMPILE_FLAGS )
+        set_target_properties( ${ProjectId} PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}" )
+    endif( MPI_COMPILE_FLAGS )
+
+    if( MPI_LINK_FLAGS )
+        set_target_properties( ${ProjectId} PROPERTIES LINK_FLAGS "${MPI_LINK_FLAGS}" )
+    endif( MPI_LINK_FLAGS )
+    target_link_libraries( ${ProjectId} ${MPI_LIBRARIES} )
+    target_link_libraries(${ProjectId} gtest gtest_main)
+
+    enable_testing()
+    add_test(NAME ${ProjectId} COMMAND ${ProjectId})
+
+    if( UNIX )
+        foreach (SOURCE_FILE ${ALL_SOURCE_FILES})
+            string(FIND ${SOURCE_FILE} ${PROJECT_BINARY_DIR} PROJECT_TRDPARTY_DIR_FOUND)
+            if (NOT ${PROJECT_TRDPARTY_DIR_FOUND} EQUAL -1)
+                list(REMOVE_ITEM ALL_SOURCE_FILES ${SOURCE_FILE})
+            endif ()
+        endforeach ()
+
+        find_program(CPPCHECK cppcheck)
+        add_custom_target(
+                "${ProjectId}_cppcheck" ALL
+                COMMAND ${CPPCHECK}
+                --enable=warning,performance,portability,information,missingInclude
+                --language=c++
+                --std=c++11
+                --error-exitcode=1
+                --template="[{severity}][{id}] {message} {callstack} \(On {file}:{line}\)"
+                --verbose
+                --quiet
+                ${ALL_SOURCE_FILES}
+        )
+    endif( UNIX )
+
+    SET(ARGS_FOR_CHECK_COUNT_TESTS "")
+    foreach (FILE_ELEM ${ALL_SOURCE_FILES})
+        set(ARGS_FOR_CHECK_COUNT_TESTS "${ARGS_FOR_CHECK_COUNT_TESTS} ${FILE_ELEM}")
+    endforeach ()
+
+    add_custom_target("${ProjectId}_check_count_tests" ALL
+            COMMAND "${Python3_EXECUTABLE}"
+                ${CMAKE_SOURCE_DIR}/scripts/check_count_tests.py
+                ${ProjectId}
+                ${ARGS_FOR_CHECK_COUNT_TESTS}
+    )
+else( USE_MPI )
+    message( STATUS "-- ${ProjectId} - NOT BUILD!"  )
+endif( USE_MPI )
+\end{lstlisting}
+
+\section{} int\_merge\_sort.cpp,
+\begin{lstlisting}
+	#include <mpi.h>
+	#include <cmath>
+	#include <iostream>
+	#include <limits>
+	#include <iterator>
+	#include <algorithm>
+	#include "../../../modules/task_3/panov_a_int_merge_sort/int_merge_sort.h"
+	
+	
+	void sortParallel(Vector* arr_) {
+		int rank, size;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		MPI_Comm_size(MPI_COMM_WORLD, &size);
+		
+		Vector& arr = *arr_;
+		Vector tempArr;
+		
+		const int step = (arr.size() / size) + ((arr.size() % size) != 0);
+		const int arraySizeWithShift = step * size;
+		
+		if (rank == 0) {
+			tempArr = arr;
+			for (int i = tempArr.size(); i < arraySizeWithShift; i++) {
+				tempArr.push_back(std::numeric_limits<int>::max());
+			}
+		}
+		
+		Vector arrPart = Vector(step);
+		MPI_Scatter(tempArr.data(), step, MPI_INT, arrPart.data(), step, MPI_INT, 0, MPI_COMM_WORLD);
+		
+		intSort(&arrPart);
+		
+		MPI_Gather(arrPart.data(), step, MPI_INT, tempArr.data(), step, MPI_INT, 0, MPI_COMM_WORLD);
+		
+		if (rank == 0) {
+			Vector result = Vector();
+			result.reserve(arraySizeWithShift);
+			for (int i = 0; i < size; i++) {
+				result = mergeSort(result, tempArr, i * step, (i + 1) * step);
+			}
+			result.resize(arr.size());
+			arr = result;
+		}
+	}
+	
+	Vector mergeSort(const Vector& first, const Vector& second, int sbegin, int send) {
+		Vector result = Vector();
+		result.reserve(first.size() + send - sbegin);
+		std::merge(
+		first.begin(),
+		first.end(),
+		second.begin() + sbegin,
+		second.begin() + send,
+		std::back_inserter(result));
+		return result;
+	}
+	
+	int getMaxCategoryForVector(Vector* arr) {
+		int maxCategory = 0;
+		for (int num : *arr) {
+			maxCategory = std::max(maxCategory, getMaxCategoryForInt(num));
+		}
+		return maxCategory;
+	}
+	
+	int getMaxCategoryForInt(int num) {
+		int category = -1;
+		do {
+			num /= 10;
+			category++;
+		} while (num != 0);
+		return category;
+	}
+	
+	int getCategoryValue(int num, int category) {
+		for (int i = 0; i < category; i++) {
+			num /= 10;
+		}
+		return num % 10;
+	}
+	
+	void intSortForCategory(Vector* arr_, int category) {
+		Vector& arr = *arr_;
+		auto tempArr = std::vector<Vector>(CATEGORIES_COUNT * 2);
+		
+		for (int i = 0; i < arr.size(); i++) {
+			int categoryValue = getCategoryValue(arr[i], category);
+			tempArr[categoryValue + CATEGORIES_COUNT - 1].push_back(arr[i]);
+		}
+		
+		arr.resize(0);
+		for (const auto& category : tempArr) {
+			for (int num : category) {
+				arr.push_back(num);
+			}
+		}
+	}
+	
+	void intSort(Vector* arr) {
+		const int maxCategory = getMaxCategoryForVector(arr);
+		for (int i = 0; i <= maxCategory; i++) {
+			intSortForCategory(arr, i);
+		}
+	}
+\end{lstlisting}
+
+\section{} int\_merge\_sort.h,
+\begin{lstlisting}
+#ifndef MODULES_TASK_3_PANOV_A_INT_MERGE_SORT_INT_MERGE_SORT_H_
+#define MODULES_TASK_3_PANOV_A_INT_MERGE_SORT_INT_MERGE_SORT_H_
+
+#include <vector>
+
+using Vector = std::vector<int>;
+
+const int CATEGORIES_COUNT = 10;
+
+Vector mergeSort(const Vector& first, const Vector& second, int sbegin, int send);
+
+int getMaxCategoryForVector(Vector* arr);
+int getMaxCategoryForInt(int num);
+int getCategoryValue(int num, int category);
+void intSortForCategory(Vector* arr_, int category);
+void intSort(Vector* arr);
+
+void sortParallel(Vector* arr);
+
+#endif  // MODULES_TASK_3_PANOV_A_INT_MERGE_SORT_INT_MERGE_SORT_H_
+\end{lstlisting}
+
+\section{}main.cpp
+\begin{lstlisting}
+	#include <gtest/gtest.h>
+	#include "./int_merge_sort.h"
+	#include <gtest-mpi-listener.hpp>
+	
+	
+	TEST(Parallel_Operations_MPI, Array_0) {
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		
+		Vector arr;
+		Vector sorted;
+		
+		sortParallel(&arr);
+		
+		if (rank == 0) {
+			ASSERT_EQ(sorted, arr);
+		}
+	}
+	
+	TEST(Parallel_Operations_MPI, Array_1) {
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		
+		Vector arr = { 420 };
+		Vector sorted = { 420 };
+		
+		sortParallel(&arr);
+		
+		if (rank == 0) {
+			ASSERT_EQ(sorted, arr);
+		}
+	}
+	
+	TEST(Parallel_Operations_MPI, Array_10) {
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		
+		Vector arr = { 114, 1001, 100, 8, 7, 6, 5, 14, 455, 780 };
+		Vector sorted = { 5, 6, 7, 8, 14, 100, 114, 455, 780, 1001 };
+		
+		sortParallel(&arr);
+		
+		if (rank == 0) {
+			ASSERT_EQ(sorted, arr);
+		}
+	}
+	
+	TEST(Parallel_Operations_MPI, Array_10_With_Negative_Nums) {
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		
+		Vector arr = { -10, 10, 30, 20, 700, 1, -42 };
+		Vector sorted = { -42, -10, 1, 10, 20, 30, 700 };
+		
+		sortParallel(&arr);
+		
+		if (rank == 0) {
+			ASSERT_EQ(sorted, arr);
+		}
+	}
+	
+	TEST(Parallel_Operations_MPI, Array_20_With_Negative_Nums) {
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		
+		Vector arr = {
+			1001, 150, 45, 30, 20, 700, 1, -42, 12345, 123456,
+			-1001, -150, -45, -30, -20, -700, -1, 42, -12345, -123456,
+		};
+		Vector sorted = {
+			-123456, -12345, -1001, -700, -150, -45, -42, -30, -20, -1,
+			1, 20, 30, 42, 45, 150, 700, 1001, 12345, 123456
+		};
+		
+		sortParallel(&arr);
+		
+		if (rank == 0) {
+			ASSERT_EQ(sorted, arr);
+		}
+	}
+	
+	int main(int argc, char** argv) {
+		::testing::InitGoogleTest(&argc, argv);
+		MPI_Init(&argc, &argv);
+		
+		::testing::AddGlobalTestEnvironment(new GTestMPIListener::MPIEnvironment);
+		::testing::TestEventListeners& listeners =
+		::testing::UnitTest::GetInstance()->listeners();
+		
+		listeners.Release(listeners.default_result_printer());
+		listeners.Release(listeners.default_xml_generator());
+		
+		listeners.Append(new GTestMPIListener::MPIMinimalistPrinter);
+		return RUN_ALL_TESTS();
+	}
+\end{lstlisting}
+
+\end{document}
